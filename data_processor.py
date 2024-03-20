@@ -1,6 +1,9 @@
 import os
+import numpy as np
 import pandas as pd
 import datetime as dt
+
+from scipy import stats
 
 class DataReader:
     
@@ -9,11 +12,7 @@ class DataReader:
         intraday_df = pd.concat([pd.read_csv(os.path.join(intraday_data_path, f)) for f in os.listdir(intraday_data_path)])
         intraday_df.Date = pd.to_datetime(intraday_df.Date, format='%Y%m%d')
         intraday_df.Time = pd.to_datetime(intraday_df.Time, format='%H:%M:%S.%f').dt.time 
-        
-        #intraday_df['Timestamp'] = pd.to_datetime(intraday_df.Date, format='%Y%m%d') +  pd.to_timedelta(intraday_df.Time)
-        #intraday_df.drop(columns= ['Date', 'Time'], inplace= True)
-        #intraday_df = intraday_df.reindex(columns= [intraday_df.columns[-1]] + list(intraday_df.columns[:-1]))
-        #intraday_df.dropna(subset = ['CumReturnResid'], inplace= True )
+    
         return intraday_df
     
     def read_daily_data(self, daily_data_path):
@@ -30,7 +29,7 @@ class DataPrep:
         self.intraday_data = intraday_data
         self.daily_data = daily_data
         
-    def get_target(self, clip = True):
+    def get_target(self, clip_MAD = False, normalize = False):
         
         def target(intraday_per_id):
             #calculate the residual return over the next 24 hrs     
@@ -47,4 +46,15 @@ class DataPrep:
         target_df = target_df.merge(self.daily_data[['Date', 'Id', 'EST_VOL']], on = ['Date', 'Id'], how = 'left')
         target_df.dropna(subset='y', inplace = True)
         
+        if clip_MAD:
+            
+            MAD_by_Date = target_df.groupby('Date').apply(lambda x: stats.median_abs_deviation(x['y'])).to_frame()
+            MAD_by_Date.reset_index(inplace=True)
+            MAD_by_Date.columns = ['Date', 'MAD']
+            
+            target_df = target_df.merge(MAD_by_Date,on= 'Date')
+            target_df['y'] = np.clip(target_df.y, -5 *target_df.MAD, 5 *target_df.MAD )
+        
+        if normalize:
+            target_df['y'] = target_df['y'] / target_df['EST_VOL']
         return target_df        
