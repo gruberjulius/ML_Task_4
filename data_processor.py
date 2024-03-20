@@ -26,8 +26,16 @@ class DataReader:
 class DataPrep:
     
     def __init__(self, intraday_data, daily_data) -> None:
-        self.intraday_data = intraday_data
-        self.daily_data = daily_data
+        self.intraday_data = intraday_data.copy()
+        self.daily_data = daily_data.copy()
+        
+    def get_feaatures(self):
+        
+        self.daily_data['MDV_63_sqrt'] = np.sqrt(self.daily_data.MDV_63)
+        
+        self.daily_data.eval('Stock_Split = SharesAdjFactor != 1', inplace= True)
+        self.daily_data['Dividend'] =  (self.daily_data['PxAdjFactor'] != 1) &  (~self.daily_data['Stock_Split'])
+        
         
     def get_target(self, clip_MAD = False, normalize = False):
         
