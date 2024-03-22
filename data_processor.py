@@ -50,7 +50,9 @@ class DataPrep:
         rolling_periods = [5, 10, 20]
         for period in rolling_periods:
             eod_data[f'Rolling_Return_{period}d'] = eod_data.groupby('Id')['CumReturnResid'].rolling(window = period, min_periods= 1).sum().droplevel(0)
-            
+
+        #delte
+        #eod_data[f'Rolling_Return_{period}d'] = eod_data.groupby('Id')['CumReturnResid'].rolling(window = period, min_periods= 1).sum().droplevel(0)
         rolling_return_cols =  [f'Rolling_Return_{i}d' for i in rolling_periods]
         rolling_prev_returns = eod_data[rolling_return_cols].groupby('Id').shift(1)
         
