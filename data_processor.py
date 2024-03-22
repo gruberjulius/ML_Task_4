@@ -84,7 +84,7 @@ class DataPrep:
             
             MAD_by_date = target_df.groupby('Date').apply(lambda x: stats.median_abs_deviation(x['y']))
             MAD_by_date.name = 'MAD'
-            target_df = target_df.join(MAD_by_date, on='Date', how='left')
+            target_df = target_df.join(MAD_by_date, on='Date')
             target_df['y'] = np.clip(target_df.y, -5 *target_df.MAD, 5 *target_df.MAD )
         
         if normalize:
