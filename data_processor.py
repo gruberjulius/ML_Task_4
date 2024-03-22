@@ -29,13 +29,20 @@ class DataPrep:
         self.intraday_data = intraday_data.copy()
         self.daily_data = daily_data.copy()
         
-    def get_feaatures(self):
+    def get_features(self):
         
-        self.daily_data['MDV_63_sqrt'] = np.sqrt(self.daily_data.MDV_63)
-        
+        self.daily_data['MDV_63_sqrt'] = np.sqrt(self.daily_data.MDV_63)        
         self.daily_data.eval('Stock_Split = SharesAdjFactor != 1', inplace= True)
         self.daily_data['Dividend'] =  (self.daily_data['PxAdjFactor'] != 1) &  (~self.daily_data['Stock_Split'])
         
+        last_time = dt.time(15, 30)
+        intraday_data = self.intraday_df.query('Time == @last_time')
+        
+        cols_to_merge = ['MDV_63_sqrt', 'Stock_Split', 'Dividend']
+        merge_on = ['Date', 'Id']
+        intraday_data = intraday_data.merge(self.daily_data[merge_on + cols_to_merge], on = merge_on, how = 'left')
+        
+        return intraday_data
         
     def get_target(self, clip_MAD = False, normalize = False):
         
@@ -65,4 +72,5 @@ class DataPrep:
         
         if normalize:
             target_df['y'] = target_df['y'] / target_df['EST_VOL']
+       
         return target_df        
