@@ -21,6 +21,7 @@ class DataReader:
         intraday_df.Time = pd.to_datetime(intraday_df.Time, format='%H:%M:%S.%f').dt.time 
         intraday_df.set_index(['Date', 'Id'], inplace=True)
         intraday_df.dropna(subset= 'CumReturnResid', inplace=True)
+        intraday_df.sort_index(level = 'Date', inplace=True)
         
         return intraday_df
     
@@ -33,6 +34,7 @@ class DataReader:
         daily_df.Date = pd.to_datetime(daily_df.Date, format=DataReader.DATEFORMAT)
         daily_df.rename(columns= {'ID':'Id'}, inplace= True)
         daily_df.set_index(['Date', 'Id'], inplace=True)
+        daily_df.sort_index(level = 'Date', inplace=True)
 
         return daily_df
         
@@ -41,8 +43,6 @@ class DataPrep:
     def __init__(self, intraday_data:pd.DataFrame, daily_data:pd.DataFrame, start_date = dt.datetime.min, features:List[str] = None)->pd.DataFrame:
         self.intraday_data = intraday_data.copy()
         self.daily_data = daily_data.copy()
-        self.daily_data.sort_index(level = 'Date',inplace=True)
-        self.intraday_data.sort_index(level = 'Date', inplace=True)
         
         #data available asof t-1 
         cols_same_day = ['Open', 'PxAdjFactor', 'SharesAdjFactor', 'SYMBOL', 'MIC']
