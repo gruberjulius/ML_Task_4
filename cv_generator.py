@@ -28,7 +28,8 @@ class ExpandingWindowCV:
         self.grid_search.cv = custom_cv_index
         self.grid_search.fit(x_train.to_numpy(), y_train.to_numpy(), sample_weight= sample_weight)
     
-    def _cv_index(self, train_data, overlap_period):
+    @staticmethod
+    def _cv_index(train_data, overlap_period):
         
         cv = []
         date_index = train_data.index.get_level_values('Date')
