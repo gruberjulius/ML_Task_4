@@ -41,6 +41,8 @@ class DataPrep:
     def __init__(self, intraday_data:pd.DataFrame, daily_data:pd.DataFrame, start_date = dt.datetime.min, features:List[str] = None)->pd.DataFrame:
         self.intraday_data = intraday_data.copy()
         self.daily_data = daily_data.copy()
+        self.daily_data.sort_index(level = 'Date',inplace=True)
+        self.intraday_data.sort_index(level = 'Date', inplace=True)
         
         #data available asof t-1 
         cols_same_day = ['Open', 'PxAdjFactor', 'SharesAdjFactor', 'SYMBOL', 'MIC']
@@ -132,6 +134,7 @@ class DataPrep:
             
         #export features to csv - create one csv file per date
         if save_to:
+            print('writing features to csv...')
             for date in intraday_data.index.get_level_values('Date'):
                 intraday_data.loc[date:date][self.features].to_csv(os.path.join(save_to, f'features.{date.strftime(DataReader.DATEFORMAT)}.csv'))
                 

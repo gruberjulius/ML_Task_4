@@ -34,7 +34,7 @@ def main():
         intraday_df = DataReader.read_intraday_data(os.path.join(args.i, 'intraday_data'), end_date = end_date)
 
         #create and output features
-        data_prep = DataPrep(intraday_df, daily_df, start_date = start_date, features=feature_cols + ['EST_Vol_preday'])
+        data_prep = DataPrep(intraday_df, daily_df, start_date = start_date, features=feature_cols + ['EST_VOL_preday'])
         create_folder(args.o)
         features = data_prep.get_features(save_to=args.o)     
            
@@ -48,7 +48,7 @@ def main():
         features = pd.concat([pd.read_csv(os.path.join(args.i, f)) for f in os.listdir(args.i)])
         
         #predict and scale back to return space
-        y_pred = loaded_model.predict(features[feature_cols]) * features['EST_Vol_Preday']
+        y_pred = loaded_model.predict(features[feature_cols]) * features['EST_VOL_preday']
         y_pred.name = 'Pred'
         y_pred.to_csv(f'{args.o}/predictions.csv')
 
