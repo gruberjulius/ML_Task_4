@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import datetime as dt
 import pandas_market_calendars as mcal
+import pandas_ta as ta
 from scipy import stats
 from typing import Callable, Dict,List
 
@@ -46,6 +47,7 @@ class DataPrep:
         
         #data available asof t-1 
         cols_same_day = ['Open', 'PxAdjFactor', 'SharesAdjFactor', 'SYMBOL', 'MIC']
+        self.daily_data['AD'] = ta.ad(self.daily_data.High, self.daily_data.Low, self.daily_data.Close, self.daily_data.Volume)
         shift_cols = [col for col in self.daily_data.columns if col not in cols_same_day]
         self.daily_data[shift_cols]= self.daily_data.groupby('Id')[shift_cols].shift()
         self.daily_data.rename(columns = {col: f'{col}_preday' for col in shift_cols}, inplace = True)
@@ -54,14 +56,13 @@ class DataPrep:
         
         #ffill nan values
         self.daily_data[['MDV_63_preday', 'EST_VOL_preday']] = self.daily_data[['MDV_63_preday', 'EST_VOL_preday']].groupby('Id').ffill()
+        self.daily_data['MDV_63_sqrt'] = np.sqrt(self.daily_data.MDV_63_preday)
         
         self.start_date = start_date
         self.features = features
 
         
     def get_features(self, rolling_periods = range(1, 21), indicators:Dict[str, Callable] = {}, save_to:str = None)->pd.DataFrame:
-        
-        self.daily_data['MDV_63_sqrt'] = np.sqrt(self.daily_data.MDV_63_preday)
         
         #corp actions
         self.daily_data['PxAdjFactorRatio'] = self.daily_data.groupby('Id', as_index=False).apply(lambda x: x.PxAdjFactor.div(x.PxAdjFactor.shift())).droplevel(0)
@@ -102,7 +103,7 @@ class DataPrep:
 
         #merge features from daily data
         intraday_data = self.intraday_data.query('Time == @last_time')
-        cols_to_merge = ['MDV_63_sqrt','MIC', 'Stock_Split', 'Dividend', 'Volume_preday', 'Open', 'Close_preday', 'EST_VOL_preday', 'PxAdjFactor', 'SharesAdjFactor', 'EarlyClose', 'NextHoliday'] +  list(indicators.keys())
+        cols_to_merge = ['MDV_63_sqrt','MIC','AD_preday', 'Stock_Split', 'Dividend', 'Volume_preday', 'Open', 'Close_preday', 'EST_VOL_preday', 'PxAdjFactor', 'SharesAdjFactor', 'EarlyClose', 'NextHoliday'] +  list(indicators.keys())
         intraday_data = intraday_data.join(self.daily_data[cols_to_merge])
         
         #volume feature
@@ -122,6 +123,10 @@ class DataPrep:
             intraday_data[f'{col}_clipped'] = self.clip_by_MAD(intraday_data[col], est_vol = intraday_data['EST_VOL_preday'])
         
         intraday_data = intraday_data.join(daily_rsi)
+        
+        #normalzie columns
+        for col in ['AD_preday', 'IntradayRSI']:
+            intraday_data[col] = self.cross_section_normalization(intraday_data[col], True, clip_std=4)
 
         #exchange info
         intraday_data['NYSE'] = intraday_data.MIC.isin(['XNYS', 'XASE'])
@@ -129,14 +134,13 @@ class DataPrep:
         
         intraday_data = intraday_data[intraday_data.index.get_level_values(0) >= self.start_date]
         intraday_data.dropna(subset= self.features, inplace=True, how = 'any')    
-        if self.features is not None:
-            intraday_data = intraday_data[self.features]
             
         #export features to csv - create one csv file per date
         if save_to:
             print('writing features to csv...')
-            for date in intraday_data.index.get_level_values('Date'):
-                intraday_data.loc[date:date][self.features].to_csv(os.path.join(save_to, f'features.{date.strftime(DataReader.DATEFORMAT)}.csv'))
+            to_write = intraday_data.reset_index().set_index(['Date', 'Time', 'Id'])
+            for date in to_write.index.get_level_values('Date'):
+                to_write.loc[date:date][self.features].to_csv(os.path.join(save_to, f'features.{date.strftime(DataReader.DATEFORMAT)}.csv'))
                 
         return intraday_data
     
@@ -168,7 +172,7 @@ class DataPrep:
 
         return daily_df
         
-    def get_target(self, clip_MAD = False, normalize = False)->pd.DataFrame:
+    def get_target(self, clip_MAD = False, normalize = False, save_to:str = None)->pd.DataFrame:
         
         data_3_30 = self.intraday_data[self.intraday_data.Time== dt.time(15, 30)].copy()
         eod_data = self.intraday_data[self.intraday_data.Time == dt.time(16, 0)].copy() 
@@ -182,11 +186,11 @@ class DataPrep:
         
         #compute y_actual_clipped to calc model R^2
         target_df['y_actual_clipped'] =  self.clip_by_MAD(target_df['y_actual'])
+        target_df = target_df.join(self.daily_data[['EST_VOL_preday', 'MDV_63_sqrt']])
         
         #y is the transformed y_actual - target var for fitting
         target_df['y'] = target_df['y_actual'].copy()
         if normalize:
-            target_df = target_df.join(self.daily_data[['EST_VOL_preday']])
             target_df.dropna(subset = 'EST_VOL_preday', inplace = True)
             target_df['y'] = target_df['y'] / target_df['EST_VOL_preday']
             
@@ -195,6 +199,14 @@ class DataPrep:
             target_df['y'] =  self.clip_by_MAD(target_df['y'])
         
         target_df = target_df[target_df.index.get_level_values(0) >= self.start_date]
+        
+        #export targets to csv - create one csv file per date
+        if save_to:
+            print('writing targets to csv...')
+            to_write = target_df.reset_index().set_index(['Date', 'Time', 'Id'])
+            for date in to_write.index.get_level_values('Date'):
+                to_write.loc[date:date][['y','EST_VOL_preday', 'MDV_63_sqrt']].to_csv(os.path.join(save_to, f'targets.{date.strftime(DataReader.DATEFORMAT)}.csv'))
+                
         return target_df        
 
     
@@ -231,10 +243,12 @@ class DataPrep:
 if __name__ == '__main__':
     
     start_date = dt.datetime(2015, 1, 1)
-    daily_data_path = r'oos_data/daily_data'
-    intraday_data_path = r'oos_data/intraday_data'
-    intraday_df = DataReader.read_intraday_data(intraday_data_path)
-    daily_df = DataReader.read_daily_data(daily_data_path)
+    # daily_data_path = r'oos_data/daily_data'
+    # intraday_data_path = r'oos_data/intraday_data'
+    # intraday_df = DataReader.read_intraday_data(intraday_data_path)
+    # daily_df = DataReader.read_daily_data(daily_data_path)
+    daily_df = pd.read_pickle('oos_daily_df.pkl')
+    intraday_df =  pd.read_pickle('oos_intraday_df.pkl')
     feature_cols = ['Rolling_Return_5d_clipped', 'Rolling_Return_10d_clipped', 'CumReturnResid', 'IntradayRSI', 'NYSE']
     data_prep = DataPrep(intraday_df, daily_df, start_date, features= feature_cols + ['EST_VOL_preday'])
     X_df = data_prep.get_features()
