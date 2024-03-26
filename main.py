@@ -1,12 +1,9 @@
+import os
+import pickle
 import argparse
 import pandas as pd
-from datetime import datetime
-import pickle
-
-# Dummy function to create features. Replace with actual feature creation logic.
-def create_features(start_date, end_date, input_dir):
-    # Replace with actual feature creation logic
-    return pd.DataFrame()
+import datetime as dt
+from data_processor import DataReader, DataPrep
 
 # Dummy function to make predictions. Replace with actual prediction logic.
 def make_predictions(features, model_path):
@@ -16,6 +13,13 @@ def make_predictions(features, model_path):
     # Replace with actual prediction logic
     predictions = model.predict(features)
     return predictions
+
+def create_folder(folder_path):
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+        print(f"Folder '{folder_path}' was created.")
+    else:
+        print(f"Folder '{folder_path}' already exists.")
 
 def main():
     parser = argparse.ArgumentParser(description='Process some dates.')
@@ -28,13 +32,19 @@ def main():
 
     args = parser.parse_args()
 
-    start_date = datetime.strptime(args.s, '%Y%m%d')
-    end_date = datetime.strptime(args.e, '%Y%m%d')
+    start_date = dt.datetime.strptime(args.s, '%Y%m%d')
+    end_date = dt.datetime.strptime(args.e, '%Y%m%d')
 
     if args.m == 1:
-        features = create_features(start_date, end_date, args.i)
-        output_path = f'{args.o}/features_{start_date.strftime("%Y%m%d")}_{end_date.strftime("%Y%m%d")}.csv'
-        features.to_csv(output_path, index=False)
+        #create features using data froms start to end dates from the input directory
+        daily_df = DataReader.read_daily_data(os.path.join(args.i, 'daily_data'), start_date, end_date)
+        intraday_df = DataReader.read_intraday_data(os.path.join(args.i, 'intraday_data'), start_date, end_date)
+
+        #create and output features
+        data_prep = DataPrep(intraday_df, daily_df)
+        create_folder(args.o)
+        features = data_prep.get_features(save_to=args.o)     
+           
     elif args.m == 2:
         if not args.p:
             raise ValueError('Model path must be provided for mode 2')
