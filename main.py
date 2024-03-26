@@ -5,14 +5,6 @@ import pandas as pd
 import datetime as dt
 from data_processor import DataReader, DataPrep
 
-# Dummy function to make predictions. Replace with actual prediction logic.
-def make_predictions(features, model_path):
-    # Load the model from the specified path
-    with open(model_path, 'rb') as model_file:
-        model = pickle.load(model_file)
-    # Replace with actual prediction logic
-    predictions = model.predict(features)
-    return predictions
 
 def create_folder(folder_path):
     if not os.path.exists(folder_path):
@@ -34,24 +26,31 @@ def main():
 
     start_date = dt.datetime.strptime(args.s, '%Y%m%d')
     end_date = dt.datetime.strptime(args.e, '%Y%m%d')
+    feature_cols = ['Rolling_Return_5d_clipped', 'Rolling_Return_10d_clipped', 'CumReturnResid', 'IntradayRSI', 'NYSE']
 
     if args.m == 1:
         #create features using data froms start to end dates from the input directory
-        daily_df = DataReader.read_daily_data(os.path.join(args.i, 'daily_data'), start_date, end_date)
-        intraday_df = DataReader.read_intraday_data(os.path.join(args.i, 'intraday_data'), start_date, end_date)
+        daily_df = DataReader.read_daily_data(os.path.join(args.i, 'daily_data'), end_date = end_date)
+        intraday_df = DataReader.read_intraday_data(os.path.join(args.i, 'intraday_data'), end_date = end_date)
 
         #create and output features
-        data_prep = DataPrep(intraday_df, daily_df)
+        data_prep = DataPrep(intraday_df, daily_df, start_date = start_date, features=feature_cols + ['EST_VOL_preday'])
         create_folder(args.o)
         features = data_prep.get_features(save_to=args.o)     
            
     elif args.m == 2:
         if not args.p:
             raise ValueError('Model path must be provided for mode 2')
-        features = pd.read_csv(f'{args.i}/features.csv')
-        predictions = make_predictions(features, args.p)
-        predictions_df = pd.DataFrame(predictions, columns=['Date', 'Time', 'Id', 'Pred'])
-        predictions_df.to_csv(f'{args.o}/predictions.csv', index=False)
+        
+        with open(os.path.join(args.p, os.listdir(args.p)), 'rb') as file:
+            loaded_model = pickle.load(file)
+    
+        features = pd.concat([pd.read_csv(os.path.join(args.i, f)) for f in os.listdir(args.i)])
+        
+        #predict and scale back to return space
+        y_pred = loaded_model.predict(features[feature_cols]) * features['EST_VOL_preday']
+        y_pred.name = 'Pred'
+        y_pred.to_csv(f'{args.o}/predictions.csv')
 
 if __name__ == '__main__':
     main()
