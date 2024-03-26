@@ -4,18 +4,19 @@ import pandas as pd
 import datetime as dt
 import pandas_market_calendars as mcal
 from scipy import stats
-from typing import Callable, Dict
+from typing import Callable, Dict,List
 
 class DataReader:
     
     DATEFORMAT = '%Y%m%d'
     
     @staticmethod
-    def read_intraday_data(intraday_data_path:str, start_date = dt.datetime.min, end_date = dt.datetime.max)->pd.DataFrame:
+    def read_intraday_data(intraday_data_path:str, end_date = dt.datetime.max)->pd.DataFrame:
         
-        print(f'Reading intraday data from {start_date.strftime(DataReader.DATEFORMAT)} to {end_date.strftime(DataReader.DATEFORMAT)}')
+        #if start_date != dt.datetime.min: start_date += dt.timedelta(days = -30) #provide some buffer for lookback features  
+        print(f'Reading intraday data up to {end_date.strftime(DataReader.DATEFORMAT)}')
         parser = lambda f: dt.datetime.strptime(f[:-4], DataReader.DATEFORMAT)
-        intraday_df = pd.concat([pd.read_csv(os.path.join(intraday_data_path, f)) for f in os.listdir(intraday_data_path) if start_date <= parser(f) <= end_date])
+        intraday_df = pd.concat([pd.read_csv(os.path.join(intraday_data_path, f)) for f in os.listdir(intraday_data_path) if parser(f) <= end_date])
         intraday_df.Date = pd.to_datetime(intraday_df.Date, format= DataReader.DATEFORMAT)
         intraday_df.Time = pd.to_datetime(intraday_df.Time, format='%H:%M:%S.%f').dt.time 
         intraday_df.set_index(['Date', 'Id'], inplace=True)
@@ -24,11 +25,11 @@ class DataReader:
         return intraday_df
     
     @staticmethod
-    def read_daily_data(daily_data_path:str, start_date = dt.datetime.min, end_date = dt.datetime.max)->pd.DataFrame:
-        
-        print(f'Reading daily data from {start_date.strftime(DataReader.DATEFORMAT)} to {end_date.strftime(DataReader.DATEFORMAT)}')
+    def read_daily_data(daily_data_path:str,  end_date = dt.datetime.max)->pd.DataFrame:
+
+        print(f'Reading daily data up to {end_date.strftime(DataReader.DATEFORMAT)}')
         parser = lambda f: dt.datetime.strptime(f[4:-4], DataReader.DATEFORMAT)
-        daily_df = pd.concat([pd.read_csv(os.path.join(daily_data_path, f)) for f in os.listdir(daily_data_path) if start_date <= parser(f) <= end_date])
+        daily_df = pd.concat([pd.read_csv(os.path.join(daily_data_path, f)) for f in os.listdir(daily_data_path) if parser(f) <= end_date])
         daily_df.Date = pd.to_datetime(daily_df.Date, format=DataReader.DATEFORMAT)
         daily_df.rename(columns= {'ID':'Id'}, inplace= True)
         daily_df.set_index(['Date', 'Id'], inplace=True)
@@ -37,7 +38,7 @@ class DataReader:
         
 class DataPrep:
     
-    def __init__(self, intraday_data:pd.DataFrame, daily_data)->pd.DataFrame:
+    def __init__(self, intraday_data:pd.DataFrame, daily_data:pd.DataFrame, start_date = dt.datetime.min, features:List[str] = None)->pd.DataFrame:
         self.intraday_data = intraday_data.copy()
         self.daily_data = daily_data.copy()
         
@@ -48,6 +49,12 @@ class DataPrep:
         self.daily_data.rename(columns = {col: f'{col}_preday' for col in shift_cols}, inplace = True)
         #convert annualized vol to daily vol
         self.daily_data.eval('EST_VOL_preday = EST_VOL_preday / sqrt(252)', inplace= True)
+        
+        #ffill nan values
+        self.daily_data[['MDV_63_preday', 'EST_VOL_preday']] = self.daily_data[['MDV_63_preday', 'EST_VOL_preday']].groupby('Id').ffill()
+        
+        self.start_date = start_date
+        self.features = features
 
         
     def get_features(self, rolling_periods = range(1, 21), indicators:Dict[str, Callable] = {}, save_to:str = None)->pd.DataFrame:
@@ -97,7 +104,7 @@ class DataPrep:
         intraday_data = intraday_data.join(self.daily_data[cols_to_merge])
         
         #volume feature
-        intraday_data.CumVolume.replace(0, np.nan, inplace=True)
+        intraday_data['CumVolume'] = intraday_data.CumVolume.where(intraday_data.CumVolume > 0, np.nan)
         intraday_data['CumVolume'] = intraday_data.groupby('Id')['CumVolume'].ffill()
         intraday_data['logCumVolume_Adj'] = np.log(1 + intraday_data.CumVolume * intraday_data.SharesAdjFactor) #adjust for corp action
         intraday_data['VolumeChange'] = intraday_data.groupby('Id')['logCumVolume_Adj'].diff()
@@ -116,13 +123,18 @@ class DataPrep:
 
         #exchange info
         intraday_data['NYSE'] = intraday_data.MIC.isin(['XNYS', 'XASE'])
-
-        intraday_data.dropna(inplace=True, how = 'all')    
+        intraday_data.NYSE = intraday_data.NYSE.astype('float')
         
+        intraday_data = intraday_data[intraday_data.index.get_level_values(0) >= self.start_date]
+        intraday_data.dropna(subset= self.features, inplace=True, how = 'any')    
+        if self.features is not None:
+            intraday_data = intraday_data[self.features]
+            
         #export features to csv - create one csv file per date
         if save_to:
             for date in intraday_data.index.get_level_values('Date'):
-                intraday_data.loc[date:date].to_csv(os.path.join(save_to, f'{date.strftime(DataReader.DATEFORMAT)}.csv'))
+                intraday_data.loc[date:date][self.features].to_csv(os.path.join(save_to, f'features.{date.strftime(DataReader.DATEFORMAT)}.csv'))
+                
         return intraday_data
     
     @staticmethod
@@ -179,6 +191,7 @@ class DataPrep:
             #clip the normalized y for training model
             target_df['y'] =  self.clip_by_MAD(target_df['y'])
         
+        target_df = target_df[target_df.index.get_level_values(0) >= self.start_date]
         return target_df        
 
     
@@ -214,8 +227,13 @@ class DataPrep:
     
 if __name__ == '__main__':
     
-    daily_df = pd.read_pickle('daily_df.pkl')
-    intraday_df =  pd.read_pickle('intraday_df.pkl')
-    data_prep = DataPrep(intraday_df, daily_df)
+    start_date = dt.datetime(2015, 1, 1)
+    daily_data_path = r'oos_data/daily_data'
+    intraday_data_path = r'oos_data/intraday_data'
+    intraday_df = DataReader.read_intraday_data(intraday_data_path)
+    daily_df = DataReader.read_daily_data(daily_data_path)
+    feature_cols = ['Rolling_Return_5d_clipped', 'Rolling_Return_10d_clipped', 'CumReturnResid', 'IntradayRSI', 'NYSE']
+    data_prep = DataPrep(intraday_df, daily_df, start_date, features= feature_cols + ['EST_VOL_preday'])
     X_df = data_prep.get_features()
-    target_df = data_prep.get_target(clip_MAD=True, normalize= True)
+    
+    
