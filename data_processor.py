@@ -51,6 +51,7 @@ class DataPrep:
         shift_cols = [col for col in self.daily_data.columns if col not in cols_same_day]
         self.daily_data[shift_cols]= self.daily_data.groupby('Id')[shift_cols].shift()
         self.daily_data.rename(columns = {col: f'{col}_preday' for col in shift_cols}, inplace = True)
+        
         #convert annualized vol to daily vol
         self.daily_data.eval('EST_VOL_preday = EST_VOL_preday / sqrt(252)', inplace= True)
         
